@@ -1,0 +1,4 @@
+wInd3x (freemyipod/wInd3x) is licensed under GPL-2.0 (or later).
+Copyright (C) 2022 Serge 'q3k' Bazanski.
+Full text: https://github.com/freemyipod/wInd3x/blob/main/LICENSE
+Referenced for research; not bundled.

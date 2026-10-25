@@ -1,0 +1,30 @@
+Ported code from ipod_theme and ipod_sun
+=========================================
+
+src/nano6studio/core/firmware_pack.py is a Python port of the iPod nano 6G
+IPSW repack path in:
+
+  ipod_theme - https://github.com/nfzerox/ipod_theme (commit 3ff647a, 2026-07-22)
+               by nfzerox and contributors (incl. TGRgitx), based on ipod_sun.
+               License: GNU GPL v3 (see ipod_theme-LICENSE.txt). Its repository
+               LICENSE also has the MIT notices for its bundled ipodhax and
+               silverutil copies (see ipodhax-LICENSE.txt and silverutil-LICENSE.txt).
+  ipod_sun   - https://github.com/CUB3D/ipod_sun (commit b7891b3, 2026-05-19)
+               by CUB3D and contributors.
+               License: GNU GPL v3 (see ipod_sun-LICENSE.txt).
+
+Upstream files ported: src/mse.rs, src/img1.rs, src/main.rs (nano6 branch:
+rsrc patch, "disk swap", IPSW zip) and helpers/fat_patch.py (SilverImagesDB
+replacement, done here by core/fat16.py).
+Changes: rewritten in Python; reads the user's own stock IPSW instead of
+downloading it; replaces SilverImagesDB in place instead of delete+recreate.
+No upstream copyright lines are present in either repository's files other
+than the license texts themselves; authorship is as stated above.
+
+Not used or bundled: the exploit/shellcode parts of ipod_sun (CFF font exploit,
+scsi_shellcode, decrypt_shellcode), the ipod_theme Fonts/Base.ttf, and the
+Apple files (bootloader, manifest) shipped in the ipod_theme repo. The Apple
+files come from the user's own stock IPSW.
+
+The nano6 path in upstream has no exploit step: it only patches rsrc and
+swaps the osos/disk section names.

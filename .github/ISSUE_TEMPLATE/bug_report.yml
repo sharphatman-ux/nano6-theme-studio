@@ -1,0 +1,35 @@
+name: Bug report
+description: Something in Nano 6 Theme Studio does not work
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not attach firmware (.ipsw / .MSE) or files extracted from it.
+        If your iPod will not boot, follow the recovery steps in the README first.
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: iPod model and firmware
+      placeholder: iPod nano 6G, 1.2 (36B10147)
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error text or self-test report
+      render: text

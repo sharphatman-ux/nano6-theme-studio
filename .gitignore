@@ -1,0 +1,46 @@
+# Apple firmware and anything extracted from it: never commit these
+*.ipsw
+*.IPSW
+*.MSE
+*.mse
+Firmware*.MSE
+SilverImagesDB*
+*.LE.bin
+*.LE.bin2
+rsrc*.bin
+rsrc*.fat
+*.ttf
+*.otf
+extract/
+nano6-research/
+# Exported themes and outputs (samples/*.n6theme are tracked explicitly)
+*_themed.ipsw
+*.n6theme
+!samples/*.n6theme
+asset-pack*.zip
+shots/
+screenshots/
+selftest*.txt
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+# Build
+build/
+dist/
+*.exe
+*.spec.bak
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
