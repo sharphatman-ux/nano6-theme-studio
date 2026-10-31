@@ -548,8 +548,9 @@ def _wallpapers_by_look(db: SilverImagesDB) -> list[tuple[str, int, int | None]]
 
 def static_glyphs(db: SilverImagesDB, face) -> set:
     """Digit / date glyphs of a face (small "Digits / detail" bitmaps and any run of 10+
-    same-size dial bitmaps). The OS draws them at per-face positions we cannot read, so the
-    Clock Faces tab hides them from editing (Advanced: all images still lists them)."""
+    same-size dial bitmaps). The OS draws them at per-face positions that are not in the
+    firmware files this app can edit (see docs/CLOCK_FACES.md). The Clock Faces tab lists
+    them so the bitmap can be replaced at its original size; it does not offer a position."""
     out = {i for r, i in face.parts if r == "Digits / detail"}
     run = []
     for r, i in face.parts + [("", None)]:

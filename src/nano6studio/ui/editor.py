@@ -251,6 +251,7 @@ class ImageEditorDialog(QDialog):
         overlay: Image.Image | None = None,
         title: str = "Edit",
         parent=None,
+        overlay_caption: str = "Show clock hands",
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -289,9 +290,13 @@ class ImageEditorDialog(QDialog):
         row.addWidget(b_adj)
         lay.addLayout(row)
         if overlay is not None:
-            self.overlay_toggle = QCheckBox("Show clock hands")
+            self.overlay_toggle = QCheckBox(overlay_caption)
             self.overlay_toggle.setChecked(True)
-            self.overlay_toggle.setToolTip("Where this face's hands turn (about the screen centre)")
+            if overlay_caption == "Show clock hands":
+                tip = "Where this face's hands turn. Hand alignment sets which bitmap pixel is pinned to the screen centre."
+            else:
+                tip = "The bitmap pixel the preview pins to the screen centre. Not stored on the iPod."
+            self.overlay_toggle.setToolTip(tip)
             self.overlay_toggle.toggled.connect(self._toggle_overlay)
             lay.addWidget(self.overlay_toggle)
         lay.addWidget(self._recolour_box())

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import math
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
@@ -21,6 +22,47 @@ if TYPE_CHECKING:
 
 # Helvetica Bold read from the user's own firmware: a path or the raw font bytes
 _FONT_PATH: str | bytes | None = None
+
+# Preview pin for a hand bitmap when the user has not set one. Not a firmware field:
+# horizontal centre of the bitmap, 82% of the way down (the previous studio preview).
+DEFAULT_PIVOT_FRAC = 0.82
+DEFAULT_FACE_CENTRE = (C.SCREEN // 2, C.SCREEN // 2)
+
+# Shown in the Clock Faces panel. Positions are not editable; see docs/CLOCK_FACES.md.
+GLYPH_HELP = (
+    "Bitmap only. The iPod draws this glyph at a fixed position compiled into the OS. "
+    "That position is not stored in SilverImagesDB or any other firmware file this app can edit. "
+    "Replacing the picture keeps the original width and height."
+)
+PIVOT_HELP = (
+    "Preview only — saved in the theme project, not written into the IPSW. "
+    "The iPod turns every hand about the screen centre (120, 120) and stores no pivot. "
+    "The pivot is the bitmap pixel this preview pins to that centre. "
+    "Default: horizontal centre, 82% down. Draw the hand's pin on that pixel "
+    "so a centre-pivoted hand matches the device."
+)
+
+
+def default_hand_pivot(size: tuple[int, int]) -> tuple[int, int]:
+    """Bitmap pixel the preview pins to the face centre when no override is set."""
+    w, h = size
+    return (w // 2, int(h * DEFAULT_PIVOT_FRAC))
+
+
+@dataclass
+class ClockPlacement:
+    """Studio-only hand placement. Defaults match a centre-pivoted hand.
+
+    ``centre`` is the point on the 240×240 screen that hands turn about.
+    ``pivots`` maps a hand image id to the bitmap pixel that lands on ``centre``.
+    Missing hands use :func:`default_hand_pivot`. Nothing here is written to the IPSW.
+    """
+
+    centre: tuple[int, int] = DEFAULT_FACE_CENTRE
+    pivots: dict[int, tuple[int, int]] = field(default_factory=dict)
+
+    def pivot_for(self, image_id: int, size: tuple[int, int]) -> tuple[int, int]:
+        return self.pivots.get(image_id) or default_hand_pivot(size)
 
 
 def set_font(path: str | bytes | None) -> None:
@@ -136,37 +178,89 @@ def _hand(len_px, w, color):
     return h
 
 
-def _rotate_hand(hand: Image.Image, angle_deg: float, pivot_from_top: int | None = None):
-    """Rotate a vertical hand bitmap (pointing up) around its pivot."""
+def _rotate_hand(hand: Image.Image, angle_deg: float, pivot: tuple[int, int] | None = None):
+    """Rotate a vertical hand bitmap (pointing up) so ``pivot`` stays fixed.
+
+    ``pivot`` is a pixel of ``hand``. The default is :func:`default_hand_pivot`.
+    """
     w, h = hand.size
-    py = pivot_from_top if pivot_from_top is not None else int(h * 0.82)
+    px, py = pivot if pivot is not None else default_hand_pivot((w, h))
     big = Image.new("RGBA", (max(w, h) * 2 + 4, max(w, h) * 2 + 4), (0, 0, 0, 0))
     cx, cy = big.width // 2, big.height // 2
-    big.alpha_composite(hand, (cx - w // 2, cy - py))
+    big.alpha_composite(hand, (cx - int(px), cy - int(py)))
     return big.rotate(-angle_deg, resample=Image.Resampling.BICUBIC, center=(cx, cy)), (cx, cy)
 
 
-def hands_overlay(
-    db: SilverImagesDB, hand_ids: list[int], size: int = 240, hh: int = 10, mm: int = 9
+def place_hand(
+    hand: Image.Image,
+    angle_deg: float,
+    pivot: tuple[int, int],
+    centre: tuple[int, int],
+    size: int = 240,
 ) -> Image.Image:
+    """Paint ``hand`` so ``pivot`` sits on ``centre`` after rotation (0° points up)."""
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    hands = [db.images[i].to_pil().convert("RGBA") for i in hand_ids if i in db.images][:2]
-    if len(hands) < 2:
-        hands = [_hand(60, 5, (255, 255, 255, 230)), _hand(90, 3, (255, 255, 255, 230))]
-    hands.sort(key=lambda h: h.height)
+    rotated, (cx, cy) = _rotate_hand(hand, angle_deg, pivot)
+    out.alpha_composite(rotated, (int(centre[0]) - cx, int(centre[1]) - cy))
+    return out
+
+
+def pivot_marker(w: int, h: int, pivot: tuple[int, int], colour=(0, 230, 255, 230)) -> Image.Image:
+    """A crosshair on the pivot pixel of a hand bitmap (editor / detail view)."""
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    x, y = int(pivot[0]), int(pivot[1])
+    d = ImageDraw.Draw(im)
+    d.line((x - 7, y, x + 7, y), fill=colour)
+    d.line((x, y - 7, x, y + 7), fill=colour)
+    return im
+
+
+def hands_overlay(
+    db: SilverImagesDB,
+    hand_ids: list[int],
+    size: int = 240,
+    hh: int = 10,
+    mm: int = 9,
+    placement: ClockPlacement | None = None,
+) -> Image.Image:
+    """Hands at 10:09. The first two bitmaps are the hour and minute hands (shorter one
+    is the hour hand, same as before). Any further bitmaps are second hands, drawn
+    pointing up so their pivot can be checked. Digits are not drawn."""
+    out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    place = placement or ClockPlacement()
+    centre = place.centre if placement is not None else (size // 2, size // 2)
+    ids = [i for i in hand_ids if i in db.images]
+    primary = [(db.images[i].to_pil().convert("RGBA"), i) for i in ids[:2]]
+    if len(primary) < 2:
+        primary = [
+            (_hand(60, 5, (255, 255, 255, 230)), None),
+            (_hand(90, 3, (255, 255, 255, 230)), None),
+        ]
+    primary.sort(key=lambda t: t[0].height)
     angles = [(hh % 12 + mm / 60) * 30, mm * 6]
-    for hand, ang in zip(hands, angles):
-        r, (cx, cy) = _rotate_hand(hand, ang, int(hand.height * 0.82))
-        out.alpha_composite(r, (size // 2 - cx, size // 2 - cy))
+    drawn: list[tuple[Image.Image, int | None, float]] = [
+        (hand, iid, ang) for (hand, iid), ang in zip(primary, angles)
+    ]
+    for iid in ids[2:]:
+        drawn.append((db.images[iid].to_pil().convert("RGBA"), iid, 0.0))
+    for hand, iid, ang in drawn:
+        pivot = (
+            place.pivot_for(iid, hand.size) if iid is not None else default_hand_pivot(hand.size)
+        )
+        out.alpha_composite(place_hand(hand, ang, pivot, centre, size))
     return out
 
 
 def clock_overlay(
-    db: SilverImagesDB, face, colour=(0, 230, 255), opacity: float = 0.7
+    db: SilverImagesDB,
+    face,
+    colour=(0, 230, 255),
+    opacity: float = 0.7,
+    placement: ClockPlacement | None = None,
 ) -> Image.Image:
-    """The face's hands (rotated to 10:09 about the screen centre, the reliable pivot) plus its
-    full-screen overlay bitmaps, as a tinted see-through layer. Digits / date are NOT drawn:
-    their positions differ per face and live in the encrypted OS."""
+    """The face's hands (10:09, pinned at ``placement``) plus its full-screen overlay
+    bitmaps, as a tinted see-through layer. Digits / date are NOT drawn: their positions
+    differ per face and live in the encrypted OS (see docs/CLOCK_FACES.md)."""
     S = C.SCREEN
     lay = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     if not face:
@@ -175,22 +269,23 @@ def clock_overlay(
         if r == "Overlay":
             lay.alpha_composite(db.images[i].to_pil().convert("RGBA").resize((S, S)))
     if face.hands():
-        lay.alpha_composite(hands_overlay(db, face.hands()))
+        lay.alpha_composite(hands_overlay(db, face.hands(), placement=placement))
     a = lay.getchannel("A").point(lambda v: int(v * opacity))
     out = Image.new("RGBA", (S, S), tuple(colour) + (0,))
     out.putalpha(a)
     if face.hands():
-        from PIL import ImageDraw
-
         d = ImageDraw.Draw(out)
-        c = S // 2
-        d.line((c - 6, c, c + 6, c), fill=tuple(colour) + (200,))
-        d.line((c, c - 6, c, c + 6), fill=tuple(colour) + (200,))
+        cx, cy = placement.centre if placement is not None else DEFAULT_FACE_CENTRE
+        d.line((cx - 6, cy, cx + 6, cy), fill=tuple(colour) + (200,))
+        d.line((cx, cy - 6, cx, cy + 6), fill=tuple(colour) + (200,))
     return out
 
 
 def render_clock(
-    db: SilverImagesDB, face: C.ClockFace | None, background: Image.Image | None = None
+    db: SilverImagesDB,
+    face: C.ClockFace | None,
+    background: Image.Image | None = None,
+    placement: ClockPlacement | None = None,
 ) -> Image.Image:
     S = C.SCREEN
     im = Image.new("RGBA", (S, S), (0, 0, 0, 255))
@@ -204,7 +299,7 @@ def render_clock(
             if r == "Overlay":
                 im.alpha_composite(db.images[i].to_pil().convert("RGBA").resize((S, S)))
         if face.hands():
-            im.alpha_composite(hands_overlay(db, face.hands()))
+            im.alpha_composite(hands_overlay(db, face.hands(), placement=placement))
     return im
 
 
@@ -243,7 +338,9 @@ def sync_face_thumbnail(proj: ThemeProject, face) -> None:
         return
     src = [i for r, i in face.parts if r in ("Background", "Overlay") or r.startswith("Hand")]
     if any(i in proj.edits for i in src):
-        t = render_clock(db, face).resize((79, 79), Image.Resampling.LANCZOS)
+        t = render_clock(db, face, placement=proj.clock_placement(face)).resize(
+            (79, 79), Image.Resampling.LANCZOS
+        )
         for i in thumbs:
             proj.apply_replacement(i, t, "clock", manual=True)
     else:

@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFormLayout,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QStackedWidget,
     QTabWidget,
     QVBoxLayout,
@@ -91,6 +94,7 @@ class MainWindow(QMainWindow):
         self.cat = None
         self.sel = None  # ("app", HomeApp) | ("face", ClockFace, part_id) | ("wall", (name,id,thumb)) | ("img", id)
         self.face: C.ClockFace | None = None
+        self._align_lock = False
         self._build_menu()
         self._build_ui()
         self._set_step(1)
@@ -209,7 +213,8 @@ class MainWindow(QMainWindow):
         self.overlay_toggle = QCheckBox("Show clock hands")
         self.overlay_toggle.setChecked(True)
         self.overlay_toggle.setToolTip(
-            "Tinted: where this face's hands turn (about the screen centre)"
+            "Tinted hands at 10:09. The iPod pins them to the screen centre; "
+            "Hand alignment sets which bitmap pixel that is in this preview."
         )
         self.overlay_toggle.toggled.connect(
             lambda on: (setattr(self.preview, "show_overlay", on), self.preview.refresh())
@@ -238,6 +243,7 @@ class MainWindow(QMainWindow):
         self.parts.setMovement(QListWidget.Movement.Static)
         self.parts.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.parts.currentItemChanged.connect(self._on_part)
+        self.align_box = self._build_align_box()
         self.replace_button = QPushButton("Replace…")
         self.replace_button.setObjectName("primary")
         self.edit_button = QPushButton("Edit framing…")
@@ -250,6 +256,7 @@ class MainWindow(QMainWindow):
             self.detail_image,
             self.detail_info,
             self.parts,
+            self.align_box,
             self.replace_button,
             self.edit_button,
             self.revert_button,
@@ -270,6 +277,106 @@ class MainWindow(QMainWindow):
     def _enable_ctx(self, on):
         for b in (self.replace_button, self.edit_button, self.revert_button):
             b.setEnabled(on)
+
+    def _build_align_box(self) -> QGroupBox:
+        box = QGroupBox("Hand alignment")
+        box.setVisible(False)
+        lay = QVBoxLayout(box)
+        note = QLabel(H.PIVOT_HELP)
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        form = QFormLayout()
+        self.align_centre_x = QSpinBox()
+        self.align_centre_y = QSpinBox()
+        self.align_pivot_x = QSpinBox()
+        self.align_pivot_y = QSpinBox()
+        for name, spin in (
+            ("alignCentreX", self.align_centre_x),
+            ("alignCentreY", self.align_centre_y),
+            ("alignPivotX", self.align_pivot_x),
+            ("alignPivotY", self.align_pivot_y),
+        ):
+            spin.setObjectName(name)
+            spin.setRange(0, C.SCREEN - 1)
+        self.align_centre_x.setToolTip("Preview only. The iPod uses 120.")
+        self.align_centre_y.setToolTip("Preview only. The iPod uses 120.")
+        self.align_pivot_x.setToolTip("Bitmap column pinned to the face centre")
+        self.align_pivot_y.setToolTip("Bitmap row pinned to the face centre")
+        form.addRow("Centre X", self.align_centre_x)
+        form.addRow("Centre Y", self.align_centre_y)
+        form.addRow("Pivot X", self.align_pivot_x)
+        form.addRow("Pivot Y", self.align_pivot_y)
+        lay.addLayout(form)
+        reset = QPushButton("Reset alignment")
+        reset.setObjectName("alignReset")
+        reset.clicked.connect(self._reset_align)
+        lay.addWidget(reset)
+        for spin in (
+            self.align_centre_x,
+            self.align_centre_y,
+            self.align_pivot_x,
+            self.align_pivot_y,
+        ):
+            spin.valueChanged.connect(self._on_align_edited)
+        return box
+
+    def _sync_align_ui(self):
+        if not hasattr(self, "align_box"):
+            return
+        if not self.sel or self.sel[0] != "face" or self.proj is None:
+            self.align_box.setVisible(False)
+            return
+        face, iid = self.sel[1], self.sel[2]
+        if not face.hands():
+            self.align_pivot_x.setEnabled(False)
+            self.align_pivot_y.setEnabled(False)
+            self.align_box.setVisible(False)
+            return
+        self.align_box.setVisible(True)
+        place = self.proj.clock_placement(face)
+        self._align_lock = True
+        try:
+            self.align_centre_x.setValue(int(place.centre[0]))
+            self.align_centre_y.setValue(int(place.centre[1]))
+            is_hand = bool(iid in face.hands())
+            self.align_pivot_x.setEnabled(is_hand)
+            self.align_pivot_y.setEnabled(is_hand)
+            if is_hand and iid in self.proj._db.images:
+                im = self.proj._db.images[iid]
+                dx, dy = H.default_hand_pivot(im.size)
+                px, py = place.pivots.get(iid, (dx, dy))
+                self.align_pivot_x.setRange(0, max(0, im.width - 1))
+                self.align_pivot_y.setRange(0, max(0, im.height - 1))
+                self.align_pivot_x.setValue(max(0, min(int(px), im.width - 1)))
+                self.align_pivot_y.setValue(max(0, min(int(py), im.height - 1)))
+        finally:
+            self._align_lock = False
+
+    def _on_align_edited(self, *_):
+        if self._align_lock or not self.sel or self.sel[0] != "face" or self.proj is None:
+            return
+        face, iid = self.sel[1], self.sel[2]
+        self.proj.set_face_centre(face, self.align_centre_x.value(), self.align_centre_y.value())
+        if iid in face.hands() and iid in self.proj._db.images:
+            im = self.proj._db.images[iid]
+            self.proj.set_hand_pivot(
+                face,
+                iid,
+                self.align_pivot_x.value(),
+                self.align_pivot_y.value(),
+                default=H.default_hand_pivot(im.size),
+            )
+        self.refresh_preview()
+        self._show_part()
+
+    def _reset_align(self):
+        if not self.sel or self.sel[0] != "face" or self.proj is None:
+            return
+        self.proj.clear_clock_align(self.sel[1])
+        self._sync_align_ui()
+        self.refresh_preview()
+        self._show_part()
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
         from nano6studio.core import session
@@ -444,15 +551,20 @@ class MainWindow(QMainWindow):
             self.parts.blockSignals(True)
             bgs = f.backgrounds()
             primary_row = 0
-            static = C.static_glyphs(db, f) | set(H.face_thumbnails(f))
+            thumbs = set(H.face_thumbnails(f))
+            static = C.static_glyphs(db, f)
             hl = H.hand_labels(db, f)
             for role, i in f.parts:
-                if i in static or role == "Preview":
-                    continue  # digit/date glyphs (static) and the 79x79 picker thumbnail (auto-generated)
+                if i in thumbs or role == "Preview":
+                    continue  # 79x79 picker thumbnail is regenerated from the face
                 if role == "Background" and i != f.background:
                     continue  # extra copies are edited together with the main one
-                label = hl.get(i, role.split()[0])
-                tip = f"{hl.get(i, role)} · {db.images[i].width}×{db.images[i].height}"
+                if i in static:
+                    label = "Glyph"
+                    tip = f"{H.GLYPH_HELP} · {db.images[i].width}×{db.images[i].height}"
+                else:
+                    label = hl.get(i, role.split()[0])
+                    tip = f"{hl.get(i, role)} · {db.images[i].width}×{db.images[i].height}"
                 if role == "Background" and len(bgs) > 1:
                     label = f"Background ×{len(bgs)}"
                     tip += f" · {len(bgs)} copies, all replaced together"
@@ -469,6 +581,7 @@ class MainWindow(QMainWindow):
             self.view.setCurrentIndex(2)
             self.refresh_preview()
             self._show_part()
+            self._sync_align_ui()
         elif kind == "wall":
             w = data[1]
             self.sel = ("wall", w, w[1])
@@ -484,6 +597,8 @@ class MainWindow(QMainWindow):
             self._show(
                 f"Image {i:08x}", im.to_pil(), f"{im.width}×{im.height} · format {im.fmt:04x}"
             )
+        if kind != "face":
+            self._sync_align_ui()
         self._enable_ctx(True)
 
     def _on_part(self, cur, _p=None):
@@ -496,9 +611,25 @@ class MainWindow(QMainWindow):
         f, i = self.sel[1], self.sel[2]
         if i is None:
             return
-        im = self.proj._db.images[i]
-        role = H.hand_labels(self.proj._db, f).get(i) or next((r for r, j in f.parts if j == i), "")
-        self._show(f"{f.name} – {role}", im.to_pil(), f"{im.width}×{im.height}. Pick a part below.")
+        db = self.proj._db
+        im = db.images[i].to_pil().convert("RGBA")
+        static = i in C.static_glyphs(db, f)
+        if static:
+            role = "Glyph"
+            info = H.GLYPH_HELP
+        else:
+            role = H.hand_labels(db, f).get(i) or next((r for r, j in f.parts if j == i), "")
+            info = f"{im.width}×{im.height}. Pick a part below."
+            if i in f.hands():
+                pivot = self.proj.clock_placement(f).pivot_for(i, im.size)
+                info = (
+                    f"{im.width}×{im.height}. Pivot ({pivot[0]}, {pivot[1]}) is the pixel "
+                    "pinned to the face centre in the preview. It is not stored on the iPod."
+                )
+                im = im.copy()
+                im.alpha_composite(H.pivot_marker(im.width, im.height, pivot))
+        self._show(f"{f.name} – {role}", im, info)
+        self._sync_align_ui()
 
     def _show(self, title, im, info):
         self.detail_title.setText(title)
@@ -527,6 +658,9 @@ class MainWindow(QMainWindow):
     def refresh_preview(self):
         if not self.proj:
             return
+        self.preview.placement = (
+            self.proj.clock_placement(self.face) if self.face is not None else None
+        )
         self.preview.set_state(self.proj._db, self.apps, self.proj.wallpaper_id, self.face)
         self._update_page_lbl()
 
@@ -550,7 +684,10 @@ class MainWindow(QMainWindow):
         shape = "rect"
         if kind == "face" and role == "Background":
             shape = "clock"
-            overlay = H.clock_overlay(db, obj)
+            overlay = H.clock_overlay(db, obj, placement=self.proj.clock_placement(obj))
+        elif kind == "face" and iid in obj.hands():
+            place = self.proj.clock_placement(obj)
+            overlay = H.pivot_marker(im.width, im.height, place.pivot_for(iid, im.size))
 
         def apply(new, kind=kind, iid=iid, obj=obj, role=role):
             cat = {"face": "clock", "wall": "wallpaper"}.get(kind, "other")
@@ -574,8 +711,16 @@ class MainWindow(QMainWindow):
 
     def _run_editor(self, src):
         _, tw, th, shape, overlay, apply = self._target()
+        caption = "Show clock hands" if shape == "clock" else "Show pivot"
         dlg = ImageEditorDialog(
-            src, tw, th, shape, overlay, f"Edit – {self.detail_title.text()}", self
+            src,
+            tw,
+            th,
+            shape,
+            overlay,
+            f"Edit – {self.detail_title.text()}",
+            self,
+            overlay_caption=caption,
         )
         self._last_editor = dlg
         if shape == "clock":  # mirror the editor in the live 240x240 preview

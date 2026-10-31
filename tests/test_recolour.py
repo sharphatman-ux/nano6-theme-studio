@@ -155,7 +155,7 @@ def _preview_for(w, app, n):
 
 
 @pytest.mark.parametrize("n", [10, 8])  # 10 = digital, 8 = analog with a digital readout
-def test_no_digit_overlay_and_digits_not_editable(app, n):
+def test_glyphs_replaceable_but_not_positioned(app, n):
     from PIL import ImageChops
 
     from nano6studio.core import catalog as C
@@ -174,11 +174,26 @@ def test_no_digit_overlay_and_digits_not_editable(app, n):
     assert not hasattr(H, "_digit_strip")
     f = _preview_for(w, app, n)
     db = w.proj._db
-    # digits/date glyphs never offered for editing
+    # digit/date glyphs are listed for bitmap replacement, not for moving
     static = C.static_glyphs(db, f)
     assert len(static) >= 10
     listed = {w.parts.item(k).data(256) for k in range(w.parts.count())}
-    assert not (listed & static) and f.background in listed
+    assert static <= listed and f.background in listed
+    assert "Glyph" in [w.parts.item(k).text() for k in range(w.parts.count())]
+    gid = next(iter(static))
+    for k in range(w.parts.count()):
+        if w.parts.item(k).data(256) == gid:
+            w.parts.setCurrentRow(k)
+            break
+    app.processEvents()
+    assert "not stored" in w.detail_info.text()
+    assert not w.align_pivot_x.isEnabled()
+    gw, gh = db.images[gid].size
+    before_clock = H.render_clock(db, f).tobytes()
+    w.proj.apply_replacement(gid, Image.new("RGB", (4, 4), (255, 0, 0)), "clock")
+    assert db.images[gid].size == (gw, gh)  # slot size kept
+    assert H.render_clock(db, f).tobytes() == before_clock  # not painted at a guessed position
+    w.proj.revert(gid)
     # overlay = hands only: identical to the bare hands layer (or empty for a hand-less face)
     ov = H.clock_overlay(db, f).getchannel("A")
     if f.hands():
@@ -225,7 +240,13 @@ def test_thumbnail_hidden_auto_regenerated_and_reverted(app):
     listed = [w.parts.item(k).data(256) for k in range(w.parts.count())]
     labels = [w.parts.item(k).text() for k in range(w.parts.count())]
     assert not set(thumbs) & set(listed) and "Preview" not in labels
-    assert sorted(l.split(" ×")[0] for l in labels) == ["Background", "Hour hand", "Minute hand"]
+    # Glyphs are listed for bitmap replacement. The dial and the two hands are still the rest.
+    assert sorted(l.split(" ×")[0] for l in labels if l != "Glyph") == [
+        "Background",
+        "Hour hand",
+        "Minute hand",
+    ]
+    assert "Glyph" in labels
     assert w.sel[2] == f.background and w.detail_title.text().endswith("Background")
     assert (
         w.detail_image.pixmap() is not None and not w.detail_image.pixmap().isNull()
@@ -283,3 +304,40 @@ def test_clock_tab_matches_ipod_picker(app):
     assert w.clock_grid.count() == 38
     w.adv.setChecked(False)
     assert w.clock_grid.count() == 18
+
+
+def test_hand_alignment_moves_preview_and_resets(app):
+    from nano6studio.core import home_render as H
+    from nano6studio.core.loader import load_ipsw, make_project
+    from nano6studio.ui.main_window import MainWindow
+
+    fw = load_ipsw(require_ipsw())
+    w = MainWindow()
+    w.attach(fw, make_project(fw))
+    w.show()
+    w.select_face(1)
+    app.processEvents()
+    assert w.align_box.isVisible()
+    rows = [r for r in range(w.parts.count()) if w.parts.item(r).text() == "Hour hand"]
+    assert rows
+    w.parts.setCurrentRow(rows[0])
+    app.processEvents()
+    assert w.align_pivot_x.isEnabled()
+    face = w.face
+    hand = w.sel[2]
+    default = H.default_hand_pivot(w.proj._db.images[hand].size)
+    assert w.align_pivot_x.value() == default[0] and w.align_pivot_y.value() == default[1]
+    before = w.preview.render().tobytes()
+    w.align_pivot_y.setValue(4)
+    app.processEvents()
+    assert w.proj.clock_placement(face).pivots[hand][1] == 4
+    assert w.preview.render().tobytes() != before
+    assert "Pivot (" in w.detail_info.text()
+    from PySide6.QtWidgets import QPushButton
+
+    reset = next(b for b in w.findChildren(QPushButton) if b.objectName() == "alignReset")
+    reset.click()
+    app.processEvents()
+    assert hand not in w.proj.clock_placement(face).pivots
+    assert w.align_pivot_y.value() == default[1]
+    assert w.preview.render().tobytes() == before
