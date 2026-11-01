@@ -9,28 +9,25 @@ import tempfile
 import pytest
 
 # Offscreen Qt. Software GL avoids a Mesa abort on GitHub runners when the
-# offscreen plugin initialises EGL without a GPU (exit 134, no Python traceback).
+# offscreen plugin initialises EGL without a GPU.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_OPENGL", "software")
 os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
 
 
-def _install_qt_fatal_log() -> None:
-    """Flush Qt's fatal text before abort(), which otherwise drops the C buffer."""
-    try:
-        from PySide6.QtCore import QtMsgType, qInstallMessageHandler
-    except ImportError:
-        return
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_sessionfinish(session, exitstatus):
+    """Leave before PySide's static destructors run.
 
-    def _handler(mode, _context, message):
-        if mode == QtMsgType.QtFatalMsg:
-            sys.stderr.write(f"Qt fatal: {message}\n")
-            sys.stderr.flush()
-
-    qInstallMessageHandler(_handler)
-
-
-_install_qt_fatal_log()
+    On CPython 3.11 (what GitHub Actions uses) those destructors segfault
+    after a successful offscreen run, so pytest's 0 becomes 139. Yield first
+    so the result summary is printed, then os._exit with that status.
+    """
+    result = yield
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(int(getattr(session, "exitstatus", exitstatus)))
+    return result
 
 
 @pytest.fixture(autouse=True)
