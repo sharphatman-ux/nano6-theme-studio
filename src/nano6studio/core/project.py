@@ -36,6 +36,9 @@ class ThemeProject:
     icon_ids: list[int] = field(default_factory=list)
     accent: str = "#5AC8FA"
     gen_style: str = "tint"
+    # Studio-only clock hand placement, keyed by the face's preview image id.
+    # Not written into the IPSW. See home_render.ClockPlacement and docs/CLOCK_FACES.md.
+    clock_align: dict[str, dict] = field(default_factory=dict)
     # working images held in memory after load
     _db: SilverImagesDB | None = field(default=None, repr=False, compare=False)
     _preview_cache: dict[int, Image.Image] = field(default_factory=dict, repr=False, compare=False)
@@ -105,6 +108,54 @@ class ThemeProject:
         self.edits.pop(image_id, None)
         self._preview_cache.pop(image_id, None)
 
+    @staticmethod
+    def _align_key(face) -> str:
+        return str(face.preview or face.background or 0)
+
+    def clock_placement(self, face):
+        """Effective preview placement for ``face`` (defaults where the project has none)."""
+        from .home_render import DEFAULT_FACE_CENTRE, ClockPlacement
+
+        raw = self.clock_align.get(self._align_key(face)) or {}
+        if "centre" in raw:
+            c = raw["centre"]
+            centre = (int(c[0]), int(c[1]))
+        else:
+            centre = DEFAULT_FACE_CENTRE
+        pivots = {int(k): (int(v[0]), int(v[1])) for k, v in (raw.get("hands") or {}).items()}
+        return ClockPlacement(centre=centre, pivots=pivots)
+
+    def set_face_centre(self, face, x: int, y: int) -> None:
+        from .home_render import DEFAULT_FACE_CENTRE
+
+        key = self._align_key(face)
+        rec = self.clock_align.setdefault(key, {})
+        if (int(x), int(y)) == DEFAULT_FACE_CENTRE:
+            rec.pop("centre", None)
+        else:
+            rec["centre"] = [int(x), int(y)]
+        self._prune_align(key)
+
+    def set_hand_pivot(self, face, image_id: int, x: int, y: int, default=None) -> None:
+        key = self._align_key(face)
+        rec = self.clock_align.setdefault(key, {})
+        hands = rec.setdefault("hands", {})
+        if default is not None and (int(x), int(y)) == (int(default[0]), int(default[1])):
+            hands.pop(str(image_id), None)
+        else:
+            hands[str(image_id)] = [int(x), int(y)]
+        if not hands:
+            rec.pop("hands", None)
+        self._prune_align(key)
+
+    def clear_clock_align(self, face) -> None:
+        self.clock_align.pop(self._align_key(face), None)
+
+    def _prune_align(self, key: str) -> None:
+        rec = self.clock_align.get(key)
+        if not rec or (not rec.get("hands") and "centre" not in rec):
+            self.clock_align.pop(key, None)
+
     def save_n6theme(self, path: Path) -> None:
         meta = {
             "name": self.name,
@@ -116,6 +167,7 @@ class ThemeProject:
             "gen_style": self.gen_style,
             "edits": {str(k): asdict(v) for k, v in self.edits.items()},
             "replacements": {str(k): v for k, v in self.replacements.items()},
+            "clock_align": self.clock_align,
             "version": 1,
         }
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -143,6 +195,7 @@ class ThemeProject:
             for k, v in (meta.get("edits") or {}).items():
                 proj.edits[int(k)] = AssetEdit(**v)
             proj.replacements = {int(k): v for k, v in (meta.get("replacements") or {}).items()}
+            proj.clock_align = {str(k): v for k, v in (meta.get("clock_align") or {}).items()}
             proj._db = db
             if db:
                 for iid, rel in proj.replacements.items():

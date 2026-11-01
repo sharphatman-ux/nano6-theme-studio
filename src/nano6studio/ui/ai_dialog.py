@@ -174,10 +174,7 @@ class AIQuickDialog(QDialog):
                 iid = labels.get(s.name)
                 if iid is None:
                     continue  # face without that hand
-                im = P.remove_plain_background(im)
-                bb = im.getchannel("A").getbbox()
-                if bb:
-                    im = im.crop(bb)
+                im = P.trim_to_alpha(P.clear_flat_background(im))
                 t = db.images[iid]
                 proj.apply_replacement(iid, P.fit(im, t.width, t.height), "clock")
                 out.append(s)
@@ -405,11 +402,10 @@ class AIPromptDialog(QDialog):
         n = 0
         clock = False
         for slot, im in pairs:
-            im = (
-                P.remove_plain_background(im)
-                if slot.kind != "wallpaper" and slot.kind != "face"
-                else im
-            )
+            if slot.kind == "hands":
+                im = P.trim_to_alpha(P.clear_flat_background(im))
+            elif slot.kind != "wallpaper" and slot.kind != "face":
+                im = P.remove_plain_background(im)
             if slot.kind == "icon":
                 apply_app_art(proj, apps[slot.name], P.fit(im, ART, ART))
             elif slot.kind == "face" and f:

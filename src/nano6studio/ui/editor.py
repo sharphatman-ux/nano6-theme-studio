@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nano6studio.core.ai_prompts import clear_flat_background
 from nano6studio.core.cropper import Placement, initial_placement, render_placement, zoom_about
 from nano6studio.core.recolor import MODES as RECOLOUR_MODES
 from nano6studio.core.recolor import apply as apply_recolour
@@ -198,14 +199,8 @@ class AdjustDialog(QDialog):
         s.setValue(int(vals.get("Hue", 0)))
         lay.addRow("Hue", s)
         self.sliders["Hue"] = s
-        from PySide6.QtCore import QTimer
-
-        self._t = QTimer(self)
-        self._t.setSingleShot(True)
-        self._t.setInterval(60)
-        self._t.timeout.connect(self._fire)
         for s in self.sliders.values():
-            s.valueChanged.connect(lambda _=0: self._t.start())
+            s.valueChanged.connect(self._queue)
         bb = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -215,6 +210,13 @@ class AdjustDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
+
+    def _queue(self, _value=0):
+        """Apply on the slider signal itself.
+
+        A QTimer timeout slot crashes CPython 3.11 here (none_dealloc in shiboken).
+        """
+        self._fire()
 
     def reset(self):
         for k, s in self.sliders.items():
@@ -228,12 +230,10 @@ class AdjustDialog(QDialog):
         return {k: (s.value() if k == "Hue" else s.value() / 100) for k, s in self.sliders.items()}
 
     def accept(self):
-        self._t.stop()
         self._fire()
         super().accept()
 
     def reject(self):
-        self._t.stop()
         if self._cb:
             self._cb(self._start)  # revert the live preview
         super().reject()
@@ -251,11 +251,16 @@ class ImageEditorDialog(QDialog):
         overlay: Image.Image | None = None,
         title: str = "Edit",
         parent=None,
+        overlay_caption: str = "Show clock hands",
+        clear_background: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(640, 640)
-        self.orig = src.convert("RGBA")
+        self._import_raw = src.convert("RGBA")
+        self.orig = (
+            clear_flat_background(self._import_raw) if clear_background else self._import_raw
+        )
         self.adjustments = {"Brightness": 1.0, "Contrast": 1.0, "Saturation": 1.0, "Hue": 0}
         self.recolour = {
             "mode": RECOLOUR_MODES[0],
@@ -289,11 +294,25 @@ class ImageEditorDialog(QDialog):
         row.addWidget(b_adj)
         lay.addLayout(row)
         if overlay is not None:
-            self.overlay_toggle = QCheckBox("Show clock hands")
+            self.overlay_toggle = QCheckBox(overlay_caption)
             self.overlay_toggle.setChecked(True)
-            self.overlay_toggle.setToolTip("Where this face's hands turn (about the screen centre)")
+            if overlay_caption == "Show clock hands":
+                tip = "Where this face's hands turn. Hand alignment sets which bitmap pixel is pinned to the screen centre."
+            else:
+                tip = "The bitmap pixel the preview pins to the screen centre. Not stored on the iPod."
+            self.overlay_toggle.setToolTip(tip)
             self.overlay_toggle.toggled.connect(self._toggle_overlay)
             lay.addWidget(self.overlay_toggle)
+        if clear_background:
+            self.clear_bg = QCheckBox("Clear background")
+            self.clear_bg.setObjectName("clearBackground")
+            self.clear_bg.setChecked(True)
+            self.clear_bg.setToolTip(
+                "Remove a flat backdrop (white, black, or a solid colour such as green) "
+                "so the hand is not a rectangle. Uncheck to keep the imported picture."
+            )
+            self.clear_bg.toggled.connect(self._toggle_clear_bg)
+            lay.addWidget(self.clear_bg)
         lay.addWidget(self._recolour_box())
         bb = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -310,8 +329,6 @@ class ImageEditorDialog(QDialog):
 
     # ---- recolour panel (live) ----
     def _recolour_box(self):
-        from PySide6.QtCore import QTimer
-
         box = QGroupBox("Recolour")
         g = QFormLayout(box)
         self.r_mode = QComboBox()
@@ -341,21 +358,21 @@ class ImageEditorDialog(QDialog):
         b = QPushButton("Reset recolour")
         b.clicked.connect(self._reset_recolour)
         g.addRow(b)
-        self._rt = QTimer(self)
-        self._rt.setSingleShot(True)
-        self._rt.setInterval(60)
-        self._rt.timeout.connect(self._recolour_changed)
         for sgl in (
             self.r_mode.currentIndexChanged,
             self.r_strength.valueChanged,
             self.r_tol.valueChanged,
             self.r_hue.valueChanged,
         ):
-            sgl.connect(lambda *_: self._rt.start())
+            sgl.connect(self._queue_recolour)
         self.r_mode.currentIndexChanged.connect(self._mode_ui)
         self._mode_ui()
         self.canvas.picked.connect(self._picked)
         return box
+
+    def _queue_recolour(self, *_args):
+        """Apply immediately. A QTimer timeout slot crashes CPython 3.11 (none_dealloc)."""
+        self._recolour_changed()
 
     def _mode_ui(self, *_):
         m = self.r_mode.currentText()
@@ -374,7 +391,7 @@ class ImageEditorDialog(QDialog):
     def set_recolour_colour(self, rgb):
         self.recolour["colour"] = tuple(rgb)
         self._swatch(self.r_colour, rgb, "Target")
-        self._rt.start()
+        self._recolour_changed()
 
     def _choose_colour(self):
         from PySide6.QtGui import QColor as _QC
@@ -395,7 +412,8 @@ class ImageEditorDialog(QDialog):
         self._swatch(self.r_src, rgb, "Source")
         if self.recolour["colour"] is None:
             self.set_recolour_colour(rgb)
-        self._rt.start()
+        else:
+            self._recolour_changed()
 
     def _recolour_changed(self):
         self.recolour.update(
@@ -420,6 +438,15 @@ class ImageEditorDialog(QDialog):
     def _toggle_overlay(self, on):
         self.canvas.show_overlay = on
         self.canvas.update()
+
+    def _toggle_clear_bg(self, on):
+        self.orig = clear_flat_background(self._import_raw) if on else self._import_raw.copy()
+        p = self.canvas.p
+        self.canvas.src = self._processed()
+        self.canvas.pm = pil_to_pixmap(self.canvas.src)
+        self.canvas.p = p
+        self.canvas.update()
+        self.live.emit()
 
     def _sync_slider(self):
         self.zoom.blockSignals(True)

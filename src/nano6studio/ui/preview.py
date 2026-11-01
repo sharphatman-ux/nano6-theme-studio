@@ -29,6 +29,7 @@ class DevicePreview(QWidget):
         self._off = 0.0
         self._pm = None
         self.show_overlay = True
+        self.placement = None  # ClockPlacement; None uses screen-centre / 82% defaults
         self.bg_override = None  # live image from an open clock-background editor
 
     def set_state(self, db, apps, wallpaper_id, face):
@@ -63,9 +64,9 @@ class DevicePreview(QWidget):
         if self.db is None:
             return None
         if self.mode == "clock":
-            im = H.render_clock(self.db, self.face, self.bg_override)
+            im = H.render_clock(self.db, self.face, self.bg_override, self.placement)
             if self.show_overlay and self.face:
-                im.alpha_composite(H.clock_overlay(self.db, self.face))
+                im.alpha_composite(H.clock_overlay(self.db, self.face, placement=self.placement))
             return im
         return H.render_home(self.db, self.wall, self.apps, self.page, self.small, self._off)
 

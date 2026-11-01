@@ -189,8 +189,6 @@ def test_hand_edit_updates_preview(fresh, app):
 
 
 def test_colour_sliders_preview_live_and_cancel_reverts(app):
-    import time
-
     from nano6studio.ui.editor import AdjustDialog, ImageEditorDialog
 
     src = Image.new("RGBA", (200, 200), (200, 60, 30, 255))
@@ -204,9 +202,6 @@ def test_colour_sliders_preview_live_and_cancel_reverts(app):
     d.show()
     d.sliders["Hue"].setValue(120)
     d.sliders["Brightness"].setValue(150)
-    t = time.time()
-    while time.time() - t < 1 and dlg.adjustments.get("Hue") != 120:
-        app.processEvents()
     assert dlg.adjustments["Hue"] == 120 and dlg.canvas.p == p0  # live, pan/zoom kept
     live = dlg.result_image().getpixel((77, 82))
     assert live != before and live[1] > live[0]  # red-orange -> greenish

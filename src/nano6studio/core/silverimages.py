@@ -137,6 +137,22 @@ class SilverImage:
 # Format -> (flags field, default row length) exactly as ipodhax/silverdb/pack.py writes them.
 FLAGS = {0x1888: 0x20, 0x0004: 0x04, 0x0008: 0x08, 0x0565: 0x10, 0x0064: 0x08, 0x0065: 0x10}
 PALETTE_MAX = {0x0064: 0xFF, 0x0065: 0xFFFF}
+# Formats whose payload can store a transparent pixel. 0x0565 / grey cannot.
+ALPHA_FORMATS = {0x1888, 0x0064, 0x0065}
+
+
+def ensure_alpha_format(im: SilverImage) -> None:
+    """Keep transparency when a replacement is written over an opaque slot.
+
+    Stock clock hands are already BGRA (0x1888). Paletted images with an alpha
+    byte stay paletted. Anything else is promoted to BGRA so a cleared backdrop
+    is not flattened into a solid rectangle.
+    """
+    if im.fmt in ALPHA_FORMATS:
+        return
+    im.fmt = 0x1888
+    im.bpp = FLAGS[0x1888]
+    im.stride = im.width * 4
 
 
 def default_stride(fmt: int, w: int) -> int:

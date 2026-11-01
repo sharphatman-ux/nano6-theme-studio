@@ -15,3 +15,11 @@ def pil_to_qimage(im: Image.Image) -> QImage:
 
 def pil_to_pixmap(im: Image.Image) -> QPixmap:
     return QPixmap.fromImage(pil_to_qimage(im))
+
+
+def qimage_to_pil(q: QImage) -> Image.Image:
+    """Copy a Qt image into an RGBA Pillow image (clipboard paste)."""
+    q = q.convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = q.width(), q.height()
+    raw = bytes(q.constBits())
+    return Image.frombytes("RGBA", (w, h), raw, "raw", "RGBA", q.bytesPerLine(), 1)
