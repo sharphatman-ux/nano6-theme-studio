@@ -73,7 +73,8 @@ The 79×79 thumbnail is not rebuilt for a glyph-only edit, because the thumbnail
 composite those glyphs (the OS draws them on the live clock).
 
 The word "Music" and the battery readout are UI strings in `SilverDB.en_GB.LE.bin`
-(`Music`, `%d per cent battery power`), not a coordinate table. This app does not edit
-those strings, and editing them would not move the label. Any other status art in
-SilverImagesDB can be replaced as a bitmap under Advanced; its position is not stored
-beside the image.
+(`Music`, `%d per cent battery power`), not a coordinate table and not a color field.
+Draw color of those strings is also absent from the fonts and from `VLyt`; see
+[LABEL_COLOR.md](LABEL_COLOR.md). This app does not edit those strings, and it does not
+offer a label-color control. Any other status art in SilverImagesDB can be replaced as a
+bitmap under Advanced; its position is not stored beside the image.

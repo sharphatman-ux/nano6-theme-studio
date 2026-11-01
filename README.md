@@ -34,7 +34,7 @@ The sample art below is original:
 ### Colour tools, clock hands and AI prompts
 - Image editor > Recolour: Tint/Colourize (colour + Strength), Replace colour (Pick from image eyedropper, target colour, Tolerance), Hue shift. Live preview, alpha preserved, Cancel reverts.
 - Home Icons tab > Recolour all home icons...: same tint/hue applied to all 18 apps (live preview, Cancel reverts).
-- Clock backgrounds: "Show clock hands" (on by default) draws the face's hands in semi-transparent cyan in the editor and the live preview (hour and minute at 10:09; any further hand bitmaps point straight up). The live preview follows the editor while it is open and switches to Clock view on the Clock Faces tab. **Hand alignment** sets the preview's screen centre and each hand's pivot pixel. Those numbers are saved in the theme project only: the firmware has no pivot field, and the iPod turns hands about the middle of the 240×240 screen. The default pivot is the horizontal centre of the bitmap, 82% of the way down — draw the pin of a custom hand on that pixel if you want the device to match the preview. Digit/date glyphs are listed on the Clock Faces tab so the bitmap can be replaced at its original size. Their positions are compiled into the OS and cannot be viewed or edited. Details: [docs/CLOCK_FACES.md](docs/CLOCK_FACES.md).
+- Clock backgrounds: "Show clock hands" (on by default) draws the face's hands in semi-transparent cyan in the editor and the live preview (hour and minute at 10:09; any further hand bitmaps point straight up). The live preview follows the editor while it is open and switches to Clock view on the Clock Faces tab. **Hand alignment** sets the preview's screen centre and each hand's pivot pixel. Those numbers are saved in the theme project only: the firmware has no pivot field, and the iPod turns hands about the middle of the 240×240 screen. The default pivot is the horizontal centre of the bitmap, 82% of the way down — draw the pin of a custom hand on that pixel if you want the device to match the preview. Digit/date glyphs are listed on the Clock Faces tab so the bitmap can be replaced at its original size. Their positions are compiled into the OS and cannot be viewed or edited. The words "Music" and the other UI labels are strings; their draw color is not stored in the fonts or in SilverDB, so the studio does not offer a label-color picker (the white text in the home preview is only a mock). Details: [docs/CLOCK_FACES.md](docs/CLOCK_FACES.md) and [docs/LABEL_COLOR.md](docs/LABEL_COLOR.md).
 - AI prompt…: pick Everything, Just icons, Just backgrounds or Watch face + hands, set a Style, Copy prompt, then Import… one sheet or several images; they are split and applied automatically (a review step appears only when the match is uncertain).
 
 
@@ -172,8 +172,9 @@ docs/                  format notes and device verification
 ```
 
 Format notes: [docs/UPSTREAM_COMPARE.md](docs/UPSTREAM_COMPARE.md),
-[docs/WALLPAPERS.md](docs/WALLPAPERS.md) and
-[docs/CLOCK_FACES.md](docs/CLOCK_FACES.md).
+[docs/WALLPAPERS.md](docs/WALLPAPERS.md),
+[docs/CLOCK_FACES.md](docs/CLOCK_FACES.md) and
+[docs/LABEL_COLOR.md](docs/LABEL_COLOR.md).
 
 ## Credits
 
