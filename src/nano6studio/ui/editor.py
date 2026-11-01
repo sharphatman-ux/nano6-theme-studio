@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from nano6studio.core.ai_prompts import clear_flat_background
 from nano6studio.core.cropper import Placement, initial_placement, render_placement, zoom_about
 from nano6studio.core.recolor import MODES as RECOLOUR_MODES
 from nano6studio.core.recolor import apply as apply_recolour
@@ -252,11 +253,15 @@ class ImageEditorDialog(QDialog):
         title: str = "Edit",
         parent=None,
         overlay_caption: str = "Show clock hands",
+        clear_background: bool = False,
     ):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(640, 640)
-        self.orig = src.convert("RGBA")
+        self._import_raw = src.convert("RGBA")
+        self.orig = (
+            clear_flat_background(self._import_raw) if clear_background else self._import_raw
+        )
         self.adjustments = {"Brightness": 1.0, "Contrast": 1.0, "Saturation": 1.0, "Hue": 0}
         self.recolour = {
             "mode": RECOLOUR_MODES[0],
@@ -299,6 +304,16 @@ class ImageEditorDialog(QDialog):
             self.overlay_toggle.setToolTip(tip)
             self.overlay_toggle.toggled.connect(self._toggle_overlay)
             lay.addWidget(self.overlay_toggle)
+        if clear_background:
+            self.clear_bg = QCheckBox("Clear background")
+            self.clear_bg.setObjectName("clearBackground")
+            self.clear_bg.setChecked(True)
+            self.clear_bg.setToolTip(
+                "Remove a flat backdrop (white, black, or a solid colour such as green) "
+                "so the hand is not a rectangle. Uncheck to keep the imported picture."
+            )
+            self.clear_bg.toggled.connect(self._toggle_clear_bg)
+            lay.addWidget(self.clear_bg)
         lay.addWidget(self._recolour_box())
         bb = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -425,6 +440,15 @@ class ImageEditorDialog(QDialog):
     def _toggle_overlay(self, on):
         self.canvas.show_overlay = on
         self.canvas.update()
+
+    def _toggle_clear_bg(self, on):
+        self.orig = clear_flat_background(self._import_raw) if on else self._import_raw.copy()
+        p = self.canvas.p
+        self.canvas.src = self._processed()
+        self.canvas.pm = pil_to_pixmap(self.canvas.src)
+        self.canvas.p = p
+        self.canvas.update()
+        self.live.emit()
 
     def _sync_slider(self):
         self.zoom.blockSignals(True)

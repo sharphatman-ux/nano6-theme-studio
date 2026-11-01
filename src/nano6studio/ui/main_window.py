@@ -38,6 +38,7 @@ from nano6studio.core.export import export_asset_pack, export_silver_db, write_i
 from nano6studio.core.icons import ART, app_art_from_db, apply_app_art
 from nano6studio.core.loader import LoadedFirmware, load_ipsw, make_project
 from nano6studio.core.project import ThemeProject
+from nano6studio.core.silverimages import ensure_alpha_format
 from nano6studio.ui.credits import CreditsDialog
 from nano6studio.ui.editor import ImageEditorDialog
 from nano6studio.ui.install_wizard import InstallWizard
@@ -246,9 +247,15 @@ class MainWindow(QMainWindow):
         self.align_box = self._build_align_box()
         self.replace_button = QPushButton("Replace…")
         self.replace_button.setObjectName("primary")
+        self.paste_button = QPushButton("Paste hand")
+        self.paste_button.setVisible(False)
+        self.paste_button.setToolTip(
+            "Paste a hand from the clipboard. A flat backdrop is cleared; uncheck it in the editor to keep it."
+        )
         self.edit_button = QPushButton("Edit framing…")
         self.revert_button = QPushButton("Revert")
         self.replace_button.clicked.connect(self.replace_selected)
+        self.paste_button.clicked.connect(self.paste_hand)
         self.edit_button.clicked.connect(self.edit_selected)
         self.revert_button.clicked.connect(self.revert_selected)
         for w in (
@@ -258,6 +265,7 @@ class MainWindow(QMainWindow):
             self.parts,
             self.align_box,
             self.replace_button,
+            self.paste_button,
             self.edit_button,
             self.revert_button,
         ):
@@ -598,6 +606,7 @@ class MainWindow(QMainWindow):
                 f"Image {i:08x}", im.to_pil(), f"{im.width}×{im.height} · format {im.fmt:04x}"
             )
         if kind != "face":
+            self.paste_button.setVisible(False)
             self._sync_align_ui()
         self._enable_ctx(True)
 
@@ -614,6 +623,7 @@ class MainWindow(QMainWindow):
         db = self.proj._db
         im = db.images[i].to_pil().convert("RGBA")
         static = i in C.static_glyphs(db, f)
+        self.paste_button.setVisible(False)
         if static:
             role = "Glyph"
             info = H.GLYPH_HELP
@@ -624,10 +634,12 @@ class MainWindow(QMainWindow):
                 pivot = self.proj.clock_placement(f).pivot_for(i, im.size)
                 info = (
                     f"{im.width}×{im.height}. Pivot ({pivot[0]}, {pivot[1]}) is the pixel "
-                    "pinned to the face centre in the preview. It is not stored on the iPod."
+                    "pinned to the face centre in the preview. It is not stored on the iPod. "
+                    "Replace or Paste clears a flat backdrop (white, black, or a solid colour)."
                 )
                 im = im.copy()
                 im.alpha_composite(H.pivot_marker(im.width, im.height, pivot))
+                self.paste_button.setVisible(True)
         self._show(f"{f.name} – {role}", im, info)
         self._sync_align_ui()
 
@@ -699,6 +711,8 @@ class MainWindow(QMainWindow):
             if kind == "wall":
                 targets = C.wallpaper_copies(iid)  # every copy of the wallpaper
             for t in targets:
+                if kind == "face" and t in obj.hands():
+                    ensure_alpha_format(self.proj._db.images[t])
                 self.proj.apply_replacement(t, new, cat)
             if kind == "face":
                 H.sync_face_thumbnail(self.proj, obj)  # 79x79 picker thumbnail, every copy
@@ -709,7 +723,7 @@ class MainWindow(QMainWindow):
 
         return im.to_pil(), im.width, im.height, shape, overlay, apply
 
-    def _run_editor(self, src):
+    def _run_editor(self, src, clear_background: bool = False):
         _, tw, th, shape, overlay, apply = self._target()
         caption = "Show clock hands" if shape == "clock" else "Show pivot"
         dlg = ImageEditorDialog(
@@ -721,6 +735,7 @@ class MainWindow(QMainWindow):
             f"Edit – {self.detail_title.text()}",
             self,
             overlay_caption=caption,
+            clear_background=clear_background,
         )
         self._last_editor = dlg
         if shape == "clock":  # mirror the editor in the live 240x240 preview
@@ -749,12 +764,38 @@ class MainWindow(QMainWindow):
         else:
             self.preview.refresh()
 
+    def _hand_selected(self) -> bool:
+        return bool(
+            self.sel
+            and self.sel[0] == "face"
+            and self.sel[2] is not None
+            and self.sel[2] in self.sel[1].hands()
+        )
+
     def replace_selected(self):
         if not self.sel:
             return
         p, _ = QFileDialog.getOpenFileName(self, "Choose image", "", IMG_FILTER)
         if p:
-            self._run_editor(Image.open(p).convert("RGBA"))
+            self._run_editor(Image.open(p).convert("RGBA"), clear_background=self._hand_selected())
+
+    def paste_hand(self):
+        if not self._hand_selected():
+            return
+        from PySide6.QtGui import QImage
+        from PySide6.QtWidgets import QApplication
+
+        from nano6studio.ui.qtutil import qimage_to_pil
+
+        clip = QApplication.clipboard()
+        q = clip.image()
+        if q.isNull():
+            pm = clip.pixmap()
+            q = pm.toImage() if not pm.isNull() else QImage()
+        if q.isNull():
+            self.statusBar().showMessage("Clipboard has no image to paste.")
+            return
+        self._run_editor(qimage_to_pil(q), clear_background=True)
 
     def edit_selected(self):
         if self.sel:

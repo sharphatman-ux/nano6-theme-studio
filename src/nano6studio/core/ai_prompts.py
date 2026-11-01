@@ -184,6 +184,98 @@ def slice_sheet(im: Image.Image, cols: int, rows: int) -> list[Image.Image]:
     ]
 
 
+def _channel_dist(a, b) -> int:
+    return max(abs(a[i] - b[i]) for i in range(3))
+
+
+def clear_flat_background(im: Image.Image, tol: int = 32) -> Image.Image:
+    """Clear a flat backdrop that touches the edges, including a second flat mat inside it.
+
+    White, black, and chroma-key colours (green and similar) are removed when the border
+    is near-uniform. A hand that is itself one flat colour is kept. Images whose corners
+    are already transparent are left alone. Interior holes are not opened.
+    """
+    src = im.convert("RGBA")
+    w, h = src.size
+    if w < 2 or h < 2:
+        return src
+    px = src.load()
+    if all(px[x, y][3] < 16 for x, y in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))):
+        return src
+    out = src
+    for _ in range(2):
+        nxt = _clear_edge_colour(out, tol)
+        if nxt is None:
+            break
+        out = nxt
+    return out
+
+
+def trim_to_alpha(im: Image.Image) -> Image.Image:
+    """Crop to the opaque pixels. An empty image is returned unchanged."""
+    bb = im.getchannel("A").getbbox()
+    return im.crop(bb) if bb else im
+
+
+def _clear_edge_colour(im: Image.Image, tol: int) -> Image.Image | None:
+    """One flood from the opaque frontier. None when there is no flat backdrop to remove."""
+    w, h = im.size
+    px = im.load()
+    frontier: list[tuple[int, int]] = []
+    for y in range(h):
+        for x in range(w):
+            if px[x, y][3] < 16:
+                continue
+            if (
+                x == 0
+                or y == 0
+                or x == w - 1
+                or y == h - 1
+                or px[x - 1, y][3] < 16
+                or px[x + 1, y][3] < 16
+                or px[x, y - 1][3] < 16
+                or px[x, y + 1][3] < 16
+            ):
+                frontier.append((x, y))
+    if len(frontier) < 4:
+        return None
+    rs = sorted(px[x, y][0] for x, y in frontier)
+    gs = sorted(px[x, y][1] for x, y in frontier)
+    bs = sorted(px[x, y][2] for x, y in frontier)
+    mid = len(frontier) // 2
+    ref = (rs[mid], gs[mid], bs[mid])
+    close = sum(1 for x, y in frontier if _channel_dist(px[x, y], ref) <= tol)
+    if close < 0.6 * len(frontier):
+        return None
+    seen = bytearray(w * h)
+    stack = [(x, y) for x, y in frontier if _channel_dist(px[x, y], ref) <= tol]
+    for x, y in stack:
+        seen[y * w + x] = 1
+    cleared = 0
+    while stack:
+        x, y = stack.pop()
+        cleared += 1
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            i = ny * w + nx
+            if 0 <= nx < w and 0 <= ny < h and not seen[i]:
+                c = px[nx, ny]
+                if c[3] >= 16 and _channel_dist(c, ref) <= tol:
+                    seen[i] = 1
+                    stack.append((nx, ny))
+    opaque = sum(1 for y in range(h) for x in range(w) if px[x, y][3] >= 16)
+    if cleared < 16 or opaque - cleared < 24:
+        return None
+    out = im.copy()
+    op = out.load()
+    for y in range(h):
+        row = y * w
+        for x in range(w):
+            if seen[row + x]:
+                r, g, b, _a = op[x, y]
+                op[x, y] = (r, g, b, 0)
+    return out
+
+
 def remove_plain_background(im: Image.Image, tol: int = 24) -> Image.Image:
     """If the four corners share one solid colour, flood it away from the edges."""
     im = im.convert("RGBA")
