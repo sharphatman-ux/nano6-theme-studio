@@ -112,15 +112,19 @@ def test_hand_editor_clears_backdrop_and_uncheck_restores():
 
     from nano6studio.ui.editor import ImageEditorDialog
 
-    QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
     src = _hand_on((0, 170, 40, 255), size=(60, 90), bar=(24, 8, 36, 80), ink=(240, 240, 240, 255))
     dlg = ImageEditorDialog(src, 34, 148, clear_background=True)
-    dlg.show()
-    assert dlg.clear_bg.isChecked()
-    assert dlg.orig.getpixel((0, 0))[3] == 0
-    assert dlg.orig.getpixel((30, 40))[3] == 255
-    framed = dlg.result_image()
-    assert framed.mode == "RGBA" and framed.getchannel("A").getextrema()[0] == 0
-    dlg.clear_bg.setChecked(False)
-    assert dlg.orig.getpixel((0, 0))[3] == 255
-    assert dlg.result_image().getchannel("A").getextrema()[0] == 255
+    try:
+        assert dlg.clear_bg.isChecked()
+        assert dlg.orig.getpixel((0, 0))[3] == 0
+        assert dlg.orig.getpixel((30, 40))[3] == 255
+        framed = dlg.result_image()
+        assert framed.mode == "RGBA" and framed.getchannel("A").getextrema()[0] == 0
+        dlg.clear_bg.setChecked(False)
+        app.processEvents()
+        assert dlg.orig.getpixel((0, 0))[3] == 255
+        assert dlg.result_image().getchannel("A").getextrema()[0] == 255
+    finally:
+        dlg.close()
+        app.processEvents()
