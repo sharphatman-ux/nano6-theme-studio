@@ -739,18 +739,13 @@ class MainWindow(QMainWindow):
         )
         self._last_editor = dlg
         if shape == "clock":  # mirror the editor in the live 240x240 preview
-            from PySide6.QtCore import QTimer
-
-            t = QTimer(dlg)
-            t.setSingleShot(True)
-            t.setInterval(80)
 
             def push():
                 self.preview.bg_override = dlg.result_image()
                 self.preview.refresh()
 
-            t.timeout.connect(push)
-            dlg.live.connect(t.start)
+            # Direct connection: a QTimer timeout slot aborts CPython 3.11 (none_dealloc).
+            dlg.live.connect(push)
             if self.view.currentIndex() != 2:
                 self.view.setCurrentIndex(2)
             push()

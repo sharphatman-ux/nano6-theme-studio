@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -53,12 +53,12 @@ class RecolourAllDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         f.addRow(bb)
-        self._t = QTimer(self)
-        self._t.setSingleShot(True)
-        self._t.setInterval(80)
-        self._t.timeout.connect(self.preview)
         for s in (self.mode.currentIndexChanged, self.strength.valueChanged, self.hue.valueChanged):
-            s.connect(lambda *_: self._t.start())
+            s.connect(self._queue)
+        self.preview()
+
+    def _queue(self, *_args):
+        """Apply immediately. A QTimer timeout slot crashes CPython 3.11 (none_dealloc)."""
         self.preview()
 
     def _swatch(self):
@@ -73,7 +73,7 @@ class RecolourAllDialog(QDialog):
         if c.isValid():
             self.colour = (c.red(), c.green(), c.blue())
             self._swatch()
-            self._t.start()
+            self.preview()
 
     def params(self):
         return {

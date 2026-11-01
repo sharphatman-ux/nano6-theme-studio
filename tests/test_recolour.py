@@ -5,7 +5,6 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import colorsys
-import time
 
 import pytest
 from firmware import require_ipsw, stock_silver  # noqa: E402
@@ -72,9 +71,6 @@ def test_editor_recolour_live_eyedropper_and_cancel(app):
     # Tint
     dlg.r_mode.setCurrentIndex(0)
     dlg.set_recolour_colour((0, 200, 0))
-    t = time.time()
-    while time.time() - t < 1:
-        app.processEvents()
     px = dlg.result_image().getpixel((20, 80))
     assert px[1] > px[0] and dlg.canvas.p == p0
     # Replace with eyedropper on the blue half
@@ -88,9 +84,6 @@ def test_editor_recolour_live_eyedropper_and_cancel(app):
     assert sx >= 100
     dlg._picked(sx, sy)
     dlg.set_recolour_colour((250, 250, 0))
-    t = time.time()
-    while time.time() - t < 1:
-        app.processEvents()
     out = dlg.result_image()
     assert (
         out.getpixel((140, 80))[:3] == (250, 250, 0)

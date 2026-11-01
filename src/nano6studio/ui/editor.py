@@ -199,14 +199,8 @@ class AdjustDialog(QDialog):
         s.setValue(int(vals.get("Hue", 0)))
         lay.addRow("Hue", s)
         self.sliders["Hue"] = s
-        from PySide6.QtCore import QTimer
-
-        self._t = QTimer(self)
-        self._t.setSingleShot(True)
-        self._t.setInterval(60)
-        self._t.timeout.connect(self._fire)
         for s in self.sliders.values():
-            s.valueChanged.connect(lambda _=0: self._t.start())
+            s.valueChanged.connect(self._queue)
         bb = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -216,6 +210,13 @@ class AdjustDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         lay.addRow(bb)
+
+    def _queue(self, _value=0):
+        """Apply on the slider signal itself.
+
+        A QTimer timeout slot crashes CPython 3.11 here (none_dealloc in shiboken).
+        """
+        self._fire()
 
     def reset(self):
         for k, s in self.sliders.items():
@@ -229,12 +230,10 @@ class AdjustDialog(QDialog):
         return {k: (s.value() if k == "Hue" else s.value() / 100) for k, s in self.sliders.items()}
 
     def accept(self):
-        self._t.stop()
         self._fire()
         super().accept()
 
     def reject(self):
-        self._t.stop()
         if self._cb:
             self._cb(self._start)  # revert the live preview
         super().reject()
@@ -330,8 +329,6 @@ class ImageEditorDialog(QDialog):
 
     # ---- recolour panel (live) ----
     def _recolour_box(self):
-        from PySide6.QtCore import QTimer
-
         box = QGroupBox("Recolour")
         g = QFormLayout(box)
         self.r_mode = QComboBox()
@@ -361,21 +358,21 @@ class ImageEditorDialog(QDialog):
         b = QPushButton("Reset recolour")
         b.clicked.connect(self._reset_recolour)
         g.addRow(b)
-        self._rt = QTimer(self)
-        self._rt.setSingleShot(True)
-        self._rt.setInterval(60)
-        self._rt.timeout.connect(self._recolour_changed)
         for sgl in (
             self.r_mode.currentIndexChanged,
             self.r_strength.valueChanged,
             self.r_tol.valueChanged,
             self.r_hue.valueChanged,
         ):
-            sgl.connect(lambda *_: self._rt.start())
+            sgl.connect(self._queue_recolour)
         self.r_mode.currentIndexChanged.connect(self._mode_ui)
         self._mode_ui()
         self.canvas.picked.connect(self._picked)
         return box
+
+    def _queue_recolour(self, *_args):
+        """Apply immediately. A QTimer timeout slot crashes CPython 3.11 (none_dealloc)."""
+        self._recolour_changed()
 
     def _mode_ui(self, *_):
         m = self.r_mode.currentText()
@@ -394,7 +391,7 @@ class ImageEditorDialog(QDialog):
     def set_recolour_colour(self, rgb):
         self.recolour["colour"] = tuple(rgb)
         self._swatch(self.r_colour, rgb, "Target")
-        self._rt.start()
+        self._recolour_changed()
 
     def _choose_colour(self):
         from PySide6.QtGui import QColor as _QC
@@ -415,7 +412,8 @@ class ImageEditorDialog(QDialog):
         self._swatch(self.r_src, rgb, "Source")
         if self.recolour["colour"] is None:
             self.set_recolour_colour(rgb)
-        self._rt.start()
+        else:
+            self._recolour_changed()
 
     def _recolour_changed(self):
         self.recolour.update(
